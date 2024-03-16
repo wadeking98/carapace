@@ -1,12 +1,11 @@
 <template>
   <v-app>
-    <DefaultBar />
-
+    <AppBar />
     <DefaultView />
   </v-app>
 </template>
 
 <script lang="ts" setup>
-  import DefaultBar from './default/AppBar.vue'
   import DefaultView from './default/View.vue'
+  import AppBar from './default/AppBar.vue'
 </script>
