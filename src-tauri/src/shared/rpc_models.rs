@@ -52,3 +52,5 @@ pub const CLIENT_CHALLENGE_RESPONSE: &str = "client_challenge_response";
 
 pub const ENCRYPTED_REQUEST: &str = "encrypted_request";
 pub const REQUEST_ENCRYPTION_PACKAGE: &str = "request_encryption_package";
+
+pub const PING: &str = "ping";

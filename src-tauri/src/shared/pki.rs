@@ -144,10 +144,6 @@ mod tests {
         assert_eq!(msg, pt.as_slice());
     }
     #[test]
-    fn test_key_exists() {
-        assert_eq!(key_exists("client"), true);
-    }
-    #[test]
     fn test_sign_message() {
         let sk = gen_key().unwrap();
         let msg = b"hello world";

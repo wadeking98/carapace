@@ -122,7 +122,7 @@ mod tests {
 
     use super::*;
 
-    use crate::client::models::Server;
+    use crate::client::models::ServerModel;
 
     #[test]
     fn test_save_entry() {
@@ -133,7 +133,7 @@ mod tests {
         db.server_db.db.clear().unwrap();
         let shared_key = ski::gen_key();
         let nonce = ski::nonce();
-        let srv = Server::new(
+        let srv = ServerModel::new(
             String::from("server_id"),
             vec![],
             vec![],
@@ -141,14 +141,14 @@ mod tests {
             8080,
         );
         let id = db.server_db.save_entry(srv).unwrap();
-        let srv = db.server_db.get_entry::<Server>(&id);
+        let srv = db.server_db.get_entry::<ServerModel>(&id);
         assert!(srv.is_ok());
         db.server_db.delete_entry(&id).unwrap();
-        let srv = db.server_db.get_entry::<Server>(&id);
+        let srv = db.server_db.get_entry::<ServerModel>(&id);
         assert!(srv.is_err());
 
         // test update entry
-        let srv = Server::new(
+        let srv = ServerModel::new(
             String::from("server_id"),
             vec![],
             vec![],
@@ -156,7 +156,7 @@ mod tests {
             8080,
         );
         let id = db.server_db.save_entry(srv).unwrap();
-        let srv = Server::new(
+        let srv = ServerModel::new(
             String::from("server_id_new"),
             vec![],
             vec![],
@@ -164,12 +164,12 @@ mod tests {
             8080,
         );
         db.server_db.update_entry(id.as_str(), srv).unwrap();
-        let srv = db.server_db.get_entry::<Server>(&id).unwrap();
+        let srv = db.server_db.get_entry::<ServerModel>(&id).unwrap();
         assert_eq!(srv.server_name, "server_id_new");
         db.server_db.delete_entry(&id).unwrap();
 
         // test get all entries
-        let srv = Server::new(
+        let srv = ServerModel::new(
             String::from("server_id1"),
             vec![],
             vec![],
@@ -177,7 +177,7 @@ mod tests {
             8080,
         );
         let id1 = db.server_db.save_entry(srv).unwrap();
-        let srv = Server::new(
+        let srv = ServerModel::new(
             String::from("server_id2"),
             vec![],
             vec![],
@@ -185,7 +185,7 @@ mod tests {
             8080,
         );
         let id2 = db.server_db.save_entry(srv).unwrap();
-        let entries = db.server_db.get_all_entries::<Server>().unwrap();
+        let entries = db.server_db.get_all_entries::<ServerModel>().unwrap();
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().find(|(id, _)| id == &id1).is_some());
         assert!(entries.iter().find(|(id, _)| id == &id2).is_some());

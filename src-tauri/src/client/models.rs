@@ -60,8 +60,8 @@ impl Chat {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Server {
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct ServerModel {
     pub server_name: String,
     pub encryption: Option<EncryptionConfiguration>,
     user_ids: Vec<String>,
@@ -69,7 +69,7 @@ pub struct Server {
     pub ip: IpAddr,
     pub port: u16,
 }
-impl Server {
+impl ServerModel {
     pub fn new(
         server_name: String,
         user_ids: Vec<String>,
@@ -77,7 +77,7 @@ impl Server {
         ip: IpAddr,
         port: u16,
     ) -> Self {
-        Server {
+        ServerModel {
             server_name,
             encryption: None,
             user_ids,

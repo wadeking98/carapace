@@ -9,19 +9,20 @@ use crate::shared::{
         decrypt_message, encrypt_message, gen_key, key_exists, read_key_from_file, sign_message,
         verify_signature, write_key_to_file,
     },
-    rpc::{Request, Response},
+    rpc::{Handler, Request, Response},
     rpc_models::{self, ClientEncryptionPackage, RespondClientChallenge, RespondServerChallenge},
+    ski::{decrypt_gcm, encrypt_gcm},
 };
 
-use self::db::TransactionDatabase;
+use self::{db::TransactionDatabase, models::ServerModel};
 
 mod db;
 mod models;
-
 struct Client {
     private_key: RsaPrivateKey,
     db: TransactionDatabase,
-    server_conn: Option<TcpStream>,
+    server_connection: Option<TcpStream>,
+    server_data: Option<ServerModel>,
 }
 impl Client {
     pub fn new(pass_key: Vec<u8>) -> Result<Self, Box<dyn Error>> {
@@ -34,12 +35,59 @@ impl Client {
         Ok(Client {
             private_key,
             db,
-            server_conn: None,
+            server_connection: None,
+            server_data: None,
         })
     }
 
+    pub async fn send_sym_encrypted_request(
+        &mut self,
+        request: Request,
+    ) -> Result<Response, Box<dyn Error>> {
+        let stream = self
+            .server_connection
+            .as_mut()
+            .ok_or("Server connection not found")?;
+        let server = self.server_data.as_ref().ok_or("Server data not found")?;
+        let request_id = request.id.clone();
+        let enc_pkg = server
+            .encryption
+            .as_ref()
+            .ok_or("Server encryption not initialized")?;
+        let req_bytes = serde_json::to_vec(&request)?;
+        let encrypted_request = encrypt_gcm(&req_bytes, &enc_pkg.shared_key, &enc_pkg.nonce)?;
+        let request_params = rpc_models::EncryptedRequestParams {
+            enc_type: rpc_models::EncryptionType::AesGcm,
+            data: encrypted_request,
+        };
+        let request = Request::new_with_id(
+            rpc_models::ENCRYPTED_REQUEST.to_string(),
+            serde_json::json!(request_params),
+            request_id,
+        );
+        let response = request.send(stream, None).await?;
+        let ct: Vec<u8> = serde_json::from_value(response.result)?;
+        let response = decrypt_gcm(&ct, &enc_pkg.shared_key, &enc_pkg.nonce)?;
+        let response: Response = serde_json::from_slice(&response)?;
+        Ok(response)
+    }
+
+    pub async fn server_ping(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = Request::new(rpc_models::PING.to_string(), serde_json::json!(null));
+        let response = self.send_sym_encrypted_request(request).await?;
+        println!("response {:?}", response);
+        let resp_val: String = serde_json::from_value(response.result)?;
+        if resp_val != "pong" {
+            Err("Server did not respond with pong")?;
+        }
+        Ok(())
+    }
+
     pub async fn server_connect(&mut self, server_id: &str) -> Result<(), Box<dyn Error>> {
-        let mut server = self.db.server_db.get_entry::<models::Server>(server_id)?;
+        let mut server = self
+            .db
+            .server_db
+            .get_entry::<models::ServerModel>(server_id)?;
         let mut stream = TcpStream::connect((server.ip, server.port)).await?;
         let request = Request::new(
             rpc_models::START_SERVER_HANDSHAKE.to_string(),
@@ -103,8 +151,9 @@ impl Client {
             package.nonce(),
             server_pub_key,
         ));
-        self.db.server_db.update_entry(server_id, server)?;
-
+        self.db.server_db.update_entry(server_id, server.clone())?;
+        self.server_connection = Some(stream);
+        self.server_data = Some(server);
         Ok(())
     }
 }
@@ -116,11 +165,11 @@ mod tests {
     use async_std::task;
 
     use crate::{
-        server::{DefaultHandler, Server},
+        server::{Server, ServerHandler},
         shared::pki::delete_key_file,
     };
 
-    use crate::client::models::Server as ServerModel;
+    use crate::client::models::ServerModel;
 
     use super::*;
 
@@ -128,7 +177,7 @@ mod tests {
     fn test_client() {
         let client = Client::new(b"example key1".to_vec()).unwrap();
         let server_private_key = gen_key().unwrap();
-        let handler = DefaultHandler::new(server_private_key.clone());
+        let handler = ServerHandler::new(server_private_key.clone());
         let server_model = ServerModel::new(
             "test_server".to_string(),
             vec![],
@@ -165,6 +214,7 @@ mod tests {
                 .get_entry::<ServerModel>(&server_id)
                 .expect("Failed to get server");
             assert!(updated_server.encryption.is_some());
+            client.server_ping().await.unwrap();
         });
         delete_key_file("client").unwrap();
     }

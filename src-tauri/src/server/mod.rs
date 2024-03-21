@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::shared::models::EncryptionConfiguration;
 use crate::shared::rpc_models::{
-    self, ClientEncryptionPackage, RespondClientChallenge, RespondServerChallenge
+    self, ClientEncryptionPackage, RespondClientChallenge, RespondServerChallenge,
 };
 use crate::shared::{
     pki,
@@ -33,14 +33,14 @@ impl Default for ServerConfig {
     }
 }
 #[derive(Clone)]
-pub struct DefaultHandler {
+pub struct ServerHandler {
     encryption: Option<EncryptionConfiguration>,
     server_private_key: RsaPrivateKey,
     pending_challenge: Option<String>,
 }
-impl DefaultHandler {
+impl ServerHandler {
     pub fn new(server_private_key: RsaPrivateKey) -> Self {
-        DefaultHandler {
+        ServerHandler {
             encryption: None,
             server_private_key,
             pending_challenge: None,
@@ -53,13 +53,25 @@ impl DefaultHandler {
             if self.encryption.is_none() {
                 return Err("Encryption not initialized".into());
             }
-            
+
             if let Some(ref encryption) = self.encryption {
-                let package = ClientEncryptionPackage::new(encryption.nonce.clone(), encryption.shared_key.clone());
+                let package = ClientEncryptionPackage::new(
+                    encryption.nonce.clone(),
+                    encryption.shared_key.clone(),
+                );
                 return Ok(Response::new(serde_json::json!(package), None, request.id));
             } else {
                 return Err("Encryption not initialized".into());
             }
+        } else {
+            Err("Invalid method".into())
+        }
+    }
+
+    fn handle_ping(&self, request: Request) -> Result<Response, Box<dyn Error>> {
+        let method = request.method.as_str();
+        if method == rpc_models::PING {
+            Ok(Response::new(serde_json::json!("pong"), None, request.id))
         } else {
             Err("Invalid method".into())
         }
@@ -104,6 +116,7 @@ impl DefaultHandler {
                 rpc_models::REQUEST_ENCRYPTION_PACKAGE => self
                     .handle_get_encryption_package(request)
                     .unwrap_or_else(error_handler),
+                rpc_models::PING => self.handle_ping(request).unwrap_or_else(error_handler),
                 _ => Response::new(
                     serde_json::json!(null),
                     Some(RpcError {
@@ -117,7 +130,10 @@ impl DefaultHandler {
             let enc_response = match enc_type {
                 rpc_models::EncryptionType::RsaPkcs1v15 => {
                     let data = serde_json::json!(&response);
-                    let data = pki::encrypt_message(&self.encryption.as_ref().unwrap().pub_key, data.to_string().as_bytes())?;
+                    let data = pki::encrypt_message(
+                        &self.encryption.as_ref().unwrap().pub_key,
+                        data.to_string().as_bytes(),
+                    )?;
                     data
                 }
                 rpc_models::EncryptionType::AesGcm => {
@@ -184,7 +200,7 @@ impl DefaultHandler {
         }
     }
 }
-impl Handler for DefaultHandler {
+impl Handler for ServerHandler {
     async fn handle(&mut self, request: Request) -> Response {
         let req_id = request.id.clone();
         let error_handler = |e: Box<dyn Error>| {
@@ -250,10 +266,10 @@ impl Server {
         let listener = TcpListener::bind(format!("{}:{}", self.ip, self.port)).await?;
         let mut incoming = listener.incoming();
         while let Some(stream) = incoming.next().await {
-            let stream = stream?;
+            let mut stream = stream?;
             let mut handler = handler.clone();
             task::spawn(async move {
-                if let Err(e) = rpc::listen(stream, &mut handler).await {
+                if let Err(e) = rpc::listen(&mut stream, &mut handler).await {
                     eprintln!("Error: {}", e);
                 }
             });
@@ -323,7 +339,7 @@ mod tests {
     #[test]
     fn test_default_handler() {
         let server_private_key = pki::gen_key().unwrap();
-        let handler = DefaultHandler::new(server_private_key.clone());
+        let handler = ServerHandler::new(server_private_key.clone());
         let server = Server::new(
             server_private_key,
             Vec::new(),

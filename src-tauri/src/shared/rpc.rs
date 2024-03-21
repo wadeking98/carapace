@@ -2,6 +2,7 @@ use async_std::{
     io::{ReadExt, WriteExt},
     net::TcpStream,
 };
+use futures::AsyncRead;
 use std::time::Duration;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -106,12 +107,11 @@ pub trait Handler {
 }
 
 pub async fn listen<H: Handler>(
-    mut stream: TcpStream,
+    stream: &mut TcpStream,
     handler: &mut H,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut buf = [0; 4096];
+    let mut buf = [0; 1024];
     let mut msg = String::new();
-    println!("attached listener to stream");
     loop {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
