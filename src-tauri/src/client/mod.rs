@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use async_std::net::TcpStream;
+use async_std::{net::TcpStream, stream, task};
 use rsa::{pkcs1v15::Signature, RsaPrivateKey};
 
 use crate::shared::{
@@ -9,18 +9,35 @@ use crate::shared::{
         decrypt_message, encrypt_message, gen_key, key_exists, read_key_from_file, sign_message,
         verify_signature, write_key_to_file,
     },
-    rpc::{Handler, Request, Response},
+    rpc::{self, Handler, Request, Response, RpcError, RpcErrorCode},
     rpc_models::{self, ClientEncryptionPackage, RespondClientChallenge, RespondServerChallenge},
     ski::{decrypt_gcm, encrypt_gcm},
 };
 
-use self::{db::TransactionDatabase, models::ServerModel};
+use self::{db::ClientDatabase, models::ServerModel};
 
 mod db;
 mod models;
+struct ClientHandler;
+impl Handler for ClientHandler {
+    async fn handle(&mut self, request: Request) -> Response {
+        let req_id = request.id.clone();
+        let response = match request.method.as_str() {
+            _ => Response::new(
+                serde_json::json!(null),
+                Some(RpcError {
+                    message: String::from("Invalid rpc method"),
+                    code: RpcErrorCode::MethodNotFound,
+                }),
+                req_id,
+            ),
+        };
+        response
+    }
+}
 struct Client {
     private_key: RsaPrivateKey,
-    db: TransactionDatabase,
+    db: ClientDatabase,
     server_connection: Option<TcpStream>,
     server_data: Option<ServerModel>,
 }
@@ -31,13 +48,31 @@ impl Client {
             write_key_to_file(&key, "client", &pass_key)?;
         }
         let private_key = read_key_from_file("client", &pass_key)?;
-        let db = TransactionDatabase::new(&pass_key)?;
+        let db = ClientDatabase::new(&pass_key)?;
         Ok(Client {
             private_key,
             db,
             server_connection: None,
             server_data: None,
         })
+    }
+
+    pub async fn start<H: Handler + Clone + Send + Sync + 'static>(
+        &self,
+        handler: H,
+    ) -> Result<(), Box<dyn Error>> {
+        if let Some(ref stream) = self.server_connection {
+            let mut handler = handler.clone();
+            let mut stream = stream.clone();
+            task::spawn(async move {
+                if let Err(e) = rpc::listen(&mut stream, &mut handler).await {
+                    eprintln!("Error: {}", e);
+                }
+            });
+        } else {
+            Err("Server connection not found")?;
+        }
+        Ok(())
     }
 
     pub async fn send_sym_encrypted_request(
@@ -149,7 +184,6 @@ impl Client {
         server.add_encryption(EncryptionConfiguration::new(
             package.shared_key(),
             package.nonce(),
-            server_pub_key,
         ));
         self.db.server_db.update_entry(server_id, server.clone())?;
         self.server_connection = Some(stream);
@@ -161,11 +195,15 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use std::net::IpAddr;
+    use std::sync::Arc;
 
+    use async_std::sync::RwLock;
     use async_std::task;
 
+    use crate::server::handler::ServerHandler;
+    use crate::server::start_server;
     use crate::{
-        server::{Server, ServerHandler},
+        server::Server,
         shared::pki::delete_key_file,
     };
 
@@ -177,7 +215,6 @@ mod tests {
     fn test_client() {
         let client = Client::new(b"example key1".to_vec()).unwrap();
         let server_private_key = gen_key().unwrap();
-        let handler = ServerHandler::new(server_private_key.clone());
         let server_model = ServerModel::new(
             "test_server".to_string(),
             vec![],
@@ -195,12 +232,11 @@ mod tests {
         let server = Server::new(
             server_private_key,
             Vec::new(),
-            "127.0.0.1".to_string(),
-            8890,
             None,
         );
+        let handler = ServerHandler::new(Arc::new(RwLock::new(server)));
         task::spawn(async move {
-            server.start(handler).await.unwrap();
+            start_server(handler, String::from("127.0.0.1"), 8890).await.unwrap();
         });
         task::block_on(async {
             let mut client = client;
@@ -216,6 +252,6 @@ mod tests {
             assert!(updated_server.encryption.is_some());
             client.server_ping().await.unwrap();
         });
-        delete_key_file("client").unwrap();
+        let _ = delete_key_file("client").unwrap_or_default();
     }
 }

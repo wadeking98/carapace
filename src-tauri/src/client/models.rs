@@ -1,4 +1,4 @@
-use std::{net::IpAddr, time::SystemTime};
+use std::{collections::HashMap, net::IpAddr, time::SystemTime};
 
 use crate::shared::models::EncryptionConfiguration;
 
@@ -40,20 +40,25 @@ impl Message {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Chat {
-    user_id: String,
+    user_ids: Vec<String>,
     name: String,
     shared_key: Vec<u8>,
-    nonce: Vec<u8>,
+    user_nonces: HashMap<String, Vec<u8>>,
     message_ids: Vec<String>,
     last_message_id: String,
 }
 impl Chat {
-    pub fn new(user_id: String, name: String, shared_key: Vec<u8>, nonce: Vec<u8>) -> Self {
+    pub fn new(
+        user_ids: Vec<String>,
+        name: String,
+        shared_key: Vec<u8>,
+        user_nonces: HashMap<String, Vec<u8>>,
+    ) -> Self {
         Chat {
-            user_id,
+            user_ids,
             name,
             shared_key,
-            nonce,
+            user_nonces,
             message_ids: Vec::new(),
             last_message_id: String::new(),
         }

@@ -46,6 +46,13 @@ pub struct EncryptedRequestParams{
     pub data: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ForwardedMessageParams{
+    pub enc_type: EncryptionType,
+    pub data: Vec<u8>,
+    pub recipients: Vec<String>,
+}
+
 pub const START_SERVER_HANDSHAKE: &str = "start_server_handshake";
 pub const CLIENT_CHALLENGE_RESPONSE: &str = "client_challenge_response";
 
@@ -54,3 +61,5 @@ pub const ENCRYPTED_REQUEST: &str = "encrypted_request";
 pub const REQUEST_ENCRYPTION_PACKAGE: &str = "request_encryption_package";
 
 pub const PING: &str = "ping";
+
+pub const FORWARDED_MSG: &str = "forwarded_message";
